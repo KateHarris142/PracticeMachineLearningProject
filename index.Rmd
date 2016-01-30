@@ -1,0 +1,151 @@
+---
+title: "Practical Machine Learning Project"
+author: "Kate Harris"
+date: "January 30, 2016"
+output: html_document
+---
+##Summary
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. The goal of your project is to predict the manner in which they did the exercise (the "classe" variable in the training set), using any of the other variables to predict with. 
+
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E). Each participant has 4 sensors; on a belt, the forearm, the arm, and the dumbbell. 
+
+```{r,message=FALSE,warning=FALSE}
+set.seed(322)
+
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(rattle)
+library(e1071)
+```
+
+The data can be downloaded from the following link:
+
+```{r,cache=TRUE}
+URL_train <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+
+train_file <- "pml_train.csv"
+if(file.exists(train_file)){
+    dat <- read.csv("pml_train.csv")
+}else{
+    download.file(URL_train,train_file,method="curl")
+    dat <- read.csv("pml_train.csv")
+}
+
+```
+
+##Cleaning the Data
+I have removed columns containing either no data or a large number of NA values. I have also removed the first 7 columns which contained the individuals data as I am not interested in this here. This leaves 49 variables (including the classe). These are gyropscope, acceleration and magnetometer data in x, y, z, as well as the roll, pitch and yaw for each of the belt, forearm, arm and dumbbell.
+
+```{r}
+amps <- grep("^amp",colnames(dat))
+avs  <- grep("^avg",colnames(dat))
+stds <- grep("^stddev",colnames(dat))
+vars <- grep("^var",colnames(dat))
+tots <- grep("^total",colnames(dat))
+mins <- grep("^min",colnames(dat))
+maxs <- grep("^max",colnames(dat))
+skew <- grep("^skewness",colnames(dat))
+kurt <- grep("^kurto",colnames(dat))
+
+removing <- c(1:7,amps,avs,stds,vars,tots,mins,maxs,skew,kurt)
+
+cleandat <- dat[,-removing]
+```
+
+I also checked the data for spurious points using pairs diagrams and removed rows with obvious anomolous points. Each time the anomolous point was more the 5$\sigma$ away from the data mean. An example of this can be seen in Fig. 1. 
+```{r,fig.cap="Fig 1: pairs diagram showing an anomolous data point"}
+pairs(cleandat[,28:30])
+
+```
+This resulted in removing only 2 rows as the anomolous points were associated with these 2 readings.
+```{r}
+toRemove <- c(which.min(cleandat$gyros_dumbbell_x),
+              which.min(cleandat$magnet_dumbbell_y) )
+
+cleandat <- cleandat[-toRemove,]
+
+```
+
+Then in order to do Machine Learning, the dataset was split into test (30%) and training (70%) sets.
+
+```{r}
+inTrain <- createDataPartition(y=cleandat$classe,p=.7,list=FALSE)
+
+training <- cleandat[inTrain,]
+testing <- cleandat[-inTrain,]
+```
+
+
+##Algorithms
+I have tried three different algorithms to the data and compared the accuracy of them to choose the best. This will then be applied to the quiz dataset.
+
+###Decision trees
+The first method was a decision tree.
+```{r,cache=TRUE}
+modDT <- train(training$classe~.,data=training,method="rpart")
+fancyRpartPlot(rpart(training$classe~.,data=training))
+confusionMatrix(testing$classe,predict(modDT,testing))
+```
+This is not a good algorithm to use, with an accuracy of 49% and does not classify any as class D. 
+
+
+###Random Forests
+Second I tried a random forest. 
+```{r,cache=TRUE}
+modRF <- randomForest(training$classe~.,data=training)
+confusionMatrix(testing$classe,predict(modRF,testing))
+```
+This algorithm has a much better accurancy of 99.6%.
+
+###Boosting
+The final algorithm was boosting.
+```{r,cache=TRUE,warning=FALSE,message=FALSE}
+modBST <- train(training$classe~.,data=training,method="gbm",verbose=FALSE)
+confusionMatrix(testing$classe,predict(modBST,testing))
+```
+This is the second best algorithm for this dataset with an accurancy of 96.5%. 
+
+##Summary
+This dataset consisted of the data from sensors (acceleratometer, gyroscope, and magnetometer) on 4 body areas (belt, forearm, arm and dumbbell) while a dumbbell was lifted in the correct way and 4 incorrect ways.
+
+The data was cleaned to remove spurious rows and columns with a large nmber of missing values. Three machine learning algorithms were applied to the training dataset. 
+Using a random forest algorithm, the test data set was classified with a 99.6% accuracy. When applied to the quix data set, 20 out of 20 of the objects were correctly classified.
+
+
+##Applying to the Quiz test data
+```{r}
+URL_test  <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+test_file <- "pml_test.csv"
+if(file.exists(test_file)){
+    testset <- read.csv("pml_test.csv")
+}else{
+    download.file(URL_test,test_file,method="curl")
+    testset <- read.csv("pml_test.csv")
+}
+
+amps <- grep("^amp",colnames(testset))
+avs  <- grep("^avg",colnames(testset))
+stds <- grep("^stddev",colnames(testset))
+vars <- grep("^var",colnames(testset))
+tots <- grep("^total",colnames(testset))
+mins <- grep("^min",colnames(testset))
+maxs <- grep("^max",colnames(testset))
+skew <- grep("^skewness",colnames(testset))
+kurt <- grep("^kurto",colnames(testset))
+
+removing <- c(1:7,amps,avs,stds,vars,tots,mins,maxs,skew,kurt)
+cleantestset <- testset[,-removing]
+
+test_classes2 <- predict(modRF,newdata=cleantestset[,1:48])
+
+```
+##Side Note.
+Given the uncertainty in the information given for this project and speaking to others, I decided to work on the "use all variables" and this gives the best results and higher accuracy. However I also completed the project using only the data from the accelerometers. Again the random forest was the best choice of algorithm and gave a 95% accuracy. This translated to 19/20 correct classification for the quiz test results. 
+
+
+###References
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. 
+For further information also see:
+http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf
